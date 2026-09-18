@@ -3,6 +3,7 @@
 from .capturer import AudioCapturer, AudioDeviceError
 from .clip import AudioClip
 from .hotkey import HotkeyListener, RecordEvent, RecordEventKind
+from .level import RmsLevelMeter
 
 __all__ = [
     "AudioCapturer",
@@ -11,4 +12,5 @@ __all__ = [
     "HotkeyListener",
     "RecordEvent",
     "RecordEventKind",
+    "RmsLevelMeter",
 ]

@@ -8,11 +8,13 @@ from .models import (
     GeminiProviderConfig,
     GroqProviderConfig,
     HotkeyConfig,
+    HudPosition,
     LocalProviderConfig,
     LoggingConfig,
     OutputConfig,
     ProviderId,
     ProvidersConfig,
+    UIConfig,
 )
 
 __all__ = [
@@ -23,10 +25,12 @@ __all__ = [
     "GeminiProviderConfig",
     "GroqProviderConfig",
     "HotkeyConfig",
+    "HudPosition",
     "LocalProviderConfig",
     "LoggingConfig",
     "OutputConfig",
     "ProviderId",
     "ProvidersConfig",
+    "UIConfig",
     "load_config",
 ]

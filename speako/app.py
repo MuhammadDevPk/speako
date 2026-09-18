@@ -6,7 +6,9 @@ Everything the app needs to run is wired here — dependencies flow one way
 
 from __future__ import annotations
 
+import contextlib
 import queue
+import threading
 from dataclasses import dataclass
 from typing import Final
 
@@ -17,6 +19,7 @@ from .transcribe import BaseTranscriber, KeyManager, TranscriberDispatcher
 from .transcribe.gemini_engine import GeminiTranscriber
 from .transcribe.groq_engine import GroqTranscriber
 from .transcribe.local import LocalEngineFactory, UnsupportedHardwareError
+from .ui import HudEvent, HudLevelEvent
 from .util.logging import get_logger
 
 _log: Final = get_logger(__name__)
@@ -30,13 +33,25 @@ class AppContext:
     dispatcher: TranscriberDispatcher
     injector: OutputInjector
     keys: KeyManager
+    # Producer→consumer channel to the HUD. Always present so the runtime
+    # code path is uniform; when the HUD is disabled the entrypoint drains
+    # this queue on its own to prevent unbounded growth.
+    hud_events: queue.Queue[HudEvent]
+    hud_enabled: bool
+    stop: threading.Event
 
 
 def build_app_context(
     config: AppConfig,
     hotkey_sink: queue.Queue[RecordEvent],
+    hud_events: queue.Queue[HudEvent],
+    stop: threading.Event,
 ) -> AppContext:
-    capturer = AudioCapturer(config.audio)
+    # The capturer publishes RMS level updates by wrapping each float into
+    # a HudLevelEvent before it hits the shared bus.
+    level_sink: queue.Queue[float] = queue.Queue(maxsize=8)
+
+    capturer = AudioCapturer(config.audio, level_sink=level_sink)
     hotkey = HotkeyListener(config.hotkey, hotkey_sink)
     keys = KeyManager(config.providers, config.cooldown)
     transcribers = _build_transcribers(config)
@@ -48,6 +63,15 @@ def build_app_context(
     )
     injector = OutputInjector(config.output)
 
+    # Adapter thread: float → HudLevelEvent. Runs as long as ``stop`` is
+    # clear. Kept tiny so it never touches any transcription state.
+    threading.Thread(
+        target=_pump_levels,
+        args=(level_sink, hud_events, stop),
+        name="speako-level-pump",
+        daemon=True,
+    ).start()
+
     return AppContext(
         config=config,
         capturer=capturer,
@@ -55,7 +79,25 @@ def build_app_context(
         dispatcher=dispatcher,
         injector=injector,
         keys=keys,
+        hud_events=hud_events,
+        hud_enabled=config.ui.enabled,
+        stop=stop,
     )
+
+
+def _pump_levels(
+    src: queue.Queue[float],
+    dst: queue.Queue[HudEvent],
+    stop: threading.Event,
+) -> None:
+    while not stop.is_set():
+        try:
+            level = src.get(timeout=0.1)
+        except queue.Empty:
+            continue
+        # HUD consumer is behind — dropping level events is invisible.
+        with contextlib.suppress(queue.Full):
+            dst.put_nowait(HudLevelEvent(level=level))
 
 
 def _build_transcribers(config: AppConfig) -> dict[ProviderId, BaseTranscriber]:

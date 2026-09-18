@@ -85,6 +85,17 @@ class LoggingConfig:
     format: LogFormat
 
 
+HudPosition = Literal["bottom_center", "top_center"]
+
+
+@dataclass(frozen=True, slots=True)
+class UIConfig:
+    enabled: bool
+    position: HudPosition
+    margin_px: int          # distance from the screen edge
+    opacity: float          # 0.0–1.0 whole-window alpha
+
+
 @dataclass(frozen=True, slots=True)
 class AppConfig:
     providers: ProvidersConfig
@@ -93,4 +104,5 @@ class AppConfig:
     output: OutputConfig
     cooldown: CooldownConfig
     logging: LoggingConfig
+    ui: UIConfig
     source_paths: tuple[str, ...] = field(default_factory=tuple)

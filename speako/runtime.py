@@ -1,12 +1,14 @@
 """Main loop: consume hotkey events, drive capture → transcribe → insert.
 
-Runs in the main thread. All heavy lifting happens on this thread (blocking
-network I/O for cloud providers, blocking local inference). The hotkey and
-audio threads only ever signal us — see PATTERNS.md §3, §4.
+When the HUD is enabled, ``run`` is launched on a worker thread and the
+Tk mainloop owns the actual process main thread — see ``__main__``.
+Either way, all heavy lifting (network I/O, local inference) happens on
+this thread; the hotkey and audio driver threads only ever signal us.
 """
 
 from __future__ import annotations
 
+import contextlib
 import queue
 import threading
 from typing import Final
@@ -15,6 +17,7 @@ from .app import AppContext
 from .audio import RecordEvent, RecordEventKind
 from .audio.clip import AudioClip
 from .transcribe import DispatchError, TranscribeError
+from .ui import HudShutdown, HudState, HudStateEvent
 from .util.logging import get_logger
 from .util.notify import notify
 
@@ -42,17 +45,25 @@ def run(app: AppContext, events: queue.Queue[RecordEvent], stop: threading.Event
                 app.capturer.begin_capture()
                 recording = True
                 _log.debug("capture_begin")
+                _hud(app, HudState.LISTENING)
             elif event.kind is RecordEventKind.RELEASE and recording:
                 recording = False
                 clip = app.capturer.end_capture()
                 _log.info("capture_end", duration_s=round(clip.duration_seconds, 3))
                 if clip.duration_seconds < _MIN_CLIP_SECONDS:
                     _log.info("clip_too_short_skipped")
+                    _hud(app, HudState.HIDDEN)
                     continue
+                _hud(app, HudState.TRANSCRIBING)
                 _process(app, clip)
     finally:
         app.hotkey.stop()
         app.capturer.close()
+        # Signal the HUD to exit so the main thread's Tk mainloop unblocks.
+        if app.hud_enabled:
+            # Best-effort — HUD will also observe stop via its poller.
+            with contextlib.suppress(queue.Full):
+                app.hud_events.put_nowait(HudShutdown())
 
 
 def _process(app: AppContext, clip: AudioClip) -> None:
@@ -63,8 +74,20 @@ def _process(app: AppContext, clip: AudioClip) -> None:
     except (DispatchError, TranscribeError) as exc:
         _log.error("transcribe_failed", error=str(exc))
         notify("speako", "Transcription failed. See logs.")
+        _hud(app, HudState.HIDDEN)
         return
     if not transcript.text:
         _log.info("empty_transcript")
+        _hud(app, HudState.HIDDEN)
         return
     app.injector.insert(transcript.text)
+    _hud(app, HudState.PASTED)
+
+
+def _hud(app: AppContext, state: HudState) -> None:
+    if not app.hud_enabled:
+        return
+    try:
+        app.hud_events.put_nowait(HudStateEvent(state=state))
+    except queue.Full:
+        _log.debug("hud_state_dropped", state=state.value)

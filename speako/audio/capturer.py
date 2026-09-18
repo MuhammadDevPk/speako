@@ -20,6 +20,7 @@ from numpy.typing import NDArray
 from ..config import AudioConfig
 from ..util.logging import get_logger
 from .clip import AudioClip
+from .level import RmsLevelMeter
 
 _log: Final = get_logger(__name__)
 
@@ -28,6 +29,11 @@ _log: Final = get_logger(__name__)
 # small block sizes. The exact number is not load-bearing — the safety
 # valve is the drop-oldest policy.
 _QUEUE_CHUNKS_PER_SECOND: Final[int] = 20
+
+# Level sink can lose the oldest reading with no visible artifact — the
+# meter always converges quickly to the current volume. Keep the queue
+# small so a slow UI thread can never accumulate stale readings.
+_LEVEL_QUEUE_MAX: Final[int] = 8
 
 
 class AudioDeviceError(RuntimeError):
@@ -49,7 +55,11 @@ class AudioCapturer:
     ``end_capture`` are called once per hotkey press/release.
     """
 
-    def __init__(self, config: AudioConfig) -> None:
+    def __init__(
+        self,
+        config: AudioConfig,
+        level_sink: queue.Queue[float] | None = None,
+    ) -> None:
         self._config = config
         self._stream: sd.InputStream | None = None
         self._queue: queue.Queue[NDArray[np.float32]] = queue.Queue(
@@ -58,6 +68,8 @@ class AudioCapturer:
         self._capturing = threading.Event()
         self._drop_count: int = 0
         self._max_samples: int = config.sample_rate * config.max_seconds
+        self._meter = RmsLevelMeter()
+        self._level_sink = level_sink
 
     def start(self) -> None:
         if self._stream is not None:
@@ -94,6 +106,7 @@ class AudioCapturer:
         # Drain any stale frames from before the press.
         self._drain_queue()
         self._drop_count = 0
+        self._meter.reset()
         self._capturing.set()
 
     def end_capture(self) -> AudioClip:
@@ -141,6 +154,20 @@ class AudioCapturer:
             except (queue.Empty, queue.Full):
                 # Racing with drainer — a dropped frame is acceptable.
                 self._drop_count += 1
+
+        # Level publication: never allowed to block or throw. Drop the
+        # oldest reading if the UI consumer is behind — the meter smooths
+        # naturally so a skipped chunk is invisible.
+        if self._level_sink is not None:
+            level = self._meter.observe(chunk)
+            try:
+                self._level_sink.put_nowait(level)
+            except queue.Full:
+                try:
+                    self._level_sink.get_nowait()
+                    self._level_sink.put_nowait(level)
+                except (queue.Empty, queue.Full):
+                    pass
 
     def _drain_queue(self) -> list[NDArray[np.float32]]:
         chunks: list[NDArray[np.float32]] = []

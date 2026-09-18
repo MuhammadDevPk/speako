@@ -51,3 +51,9 @@ cooldown:
 logging:
   level: INFO
   format: json           # "json" or "text"
+
+ui:
+  enabled: true          # false → headless (no floating overlay); runtime stays on main thread
+  position: bottom_center  # "bottom_center" or "top_center"
+  margin_px: 80          # distance from the chosen screen edge
+  opacity: 0.92          # whole-window alpha, 0.0–1.0

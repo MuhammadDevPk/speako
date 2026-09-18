@@ -39,6 +39,8 @@ Hold a hotkey, speak, release — your transcript is pasted into whatever window
 ## Features
 
 - **Push-to-talk workflow.** Hold a global hotkey → record → release → paste. Nothing to click.
+- **Floating HUD overlay.** Frameless topmost pill shows a glowing red dot + 5 dancing bars while recording, a spinner while transcribing, and a fading green check when the transcript is pasted. Fully skippable via `--no-hud`.
+- **Real-time RMS meter.** Rolling noise floor + attack/release smoothing drives the dancing bars from your actual voice amplitude.
 - **Provider chain with automatic fallback.** Configure Groq → Gemini → local; the dispatcher retries with different keys inside a provider before moving to the next.
 - **API key pool with a circuit-breaker per key.** Each key transitions through `ACTIVE → DEGRADED → COOLDOWN → INACTIVE` based on observed errors (429 / 401 / 402 / 5xx). Cooldowns are exponential with a configurable cap.
 - **Hardware-aware local engine.** Auto-selects `mlx-whisper` on Apple Silicon (uses the ANE/Metal) and `faster-whisper` on x86_64.
@@ -75,6 +77,10 @@ Deep dives in [`ARCHITECTURE.md`](ARCHITECTURE.md), [`PATTERNS.md`](PATTERNS.md)
 - **A working microphone** and OS permission for it.
 - **Accessibility permission** (macOS) or equivalent to send synthetic keystrokes.
 - **At least one provider ready to use.** Either a Groq / Gemini API key or the local backend for your CPU.
+- **Tcl/Tk libraries** for the floating HUD overlay. uv's bundled cpython does not ship Tk; the HUD raises a clear `HudUnavailableError` and falls back if it can't initialize. Either use system Python + Tk (below) or run with `--no-hud`:
+  - macOS: `brew install python-tk`
+  - Debian / Ubuntu: `sudo apt install python3-tk`
+  - Fedora: `sudo dnf install python3-tkinter`
 
 ## Installation
 
@@ -170,15 +176,24 @@ cooldown:
 logging:
   level: INFO                       # DEBUG | INFO | WARNING | ERROR | CRITICAL
   format: json                      # "json" or "text"
+
+ui:
+  enabled: true                     # false → headless (no overlay), runtime on main thread
+  position: bottom_center           # "bottom_center" or "top_center"
+  margin_px: 80                     # distance from the chosen screen edge
+  opacity: 0.92                     # whole-window alpha, 0.0–1.0
 ```
 
 ### CLI flags
 
 ```
-speako [--config PATH] [--log-level {DEBUG,INFO,WARNING,ERROR}] [--log-format {json,text}]
+speako [--config PATH]
+       [--log-level {DEBUG,INFO,WARNING,ERROR}]
+       [--log-format {json,text}]
+       [--no-hud]
 ```
 
-CLI flags override YAML and env for the relevant fields.
+CLI flags override YAML and env for the relevant fields. `--no-hud` is equivalent to `ui.enabled: false` and runs the app on the main thread with no overlay.
 
 ## API keys and rotation
 
@@ -236,6 +251,7 @@ Stop with `Ctrl+C`.
 - On first run, macOS prompts for **Microphone** and **Accessibility** permission. Grant both to whichever binary launches speako (Terminal.app, iTerm, VS Code integrated terminal, or a bundled launcher).
 - Default hotkey `right_option` (Right ⌥) is unbound on stock macOS.
 - The local backend uses `mlx-whisper`, which JIT-loads Metal kernels on first use — expect a small warmup on the first transcription of the session.
+- The HUD is configured as a proper system overlay via `pyobjc`: it appears on **every Space** (including fullscreen apps), sits at `NSStatusWindowLevel`, and **passes clicks through** (`ignoresMouseEvents`). It never steals focus, so paste into the currently focused input works even while the HUD is visible.
 
 ### Linux
 
@@ -257,6 +273,18 @@ Stop with `Ctrl+C`.
 <summary><b>"no usable providers"</b> on startup</summary>
 
 You configured a provider in `priority` but neither installed its extra nor provided keys. Either `uv sync --extra <name>`, add keys to `.env`, or remove the provider from `priority`.
+</details>
+
+<details>
+<summary><b>HUD doesn't appear</b> — <code>hud_unavailable_falling_back_headless</code> in logs</summary>
+
+Your Python doesn't ship with Tcl/Tk. This is common with `uv`'s bundled cpython. Fix by installing system Tk:
+
+* macOS: `brew install python-tk`
+* Debian / Ubuntu: `sudo apt install python3-tk`
+* Fedora: `sudo dnf install python3-tkinter`
+
+Then either point `uv` at that Python (`uv python pin 3.12.6+system`) or install speako with system pip. Alternatively, run `speako --no-hud` — everything else works the same.
 </details>
 
 <details>
@@ -329,7 +357,8 @@ speako/
 │   └── loader.py          # YAML + env + CLI precedence, validation
 ├── audio/
 │   ├── clip.py            # AudioClip + WAV serialization (stdlib wave)
-│   ├── capturer.py        # sounddevice InputStream, drop-oldest queue
+│   ├── capturer.py        # sounddevice InputStream, drop-oldest queue, RMS meter hook
+│   ├── level.py           # RmsLevelMeter: dB + rolling floor + attack/release
 │   └── hotkey.py          # pynput listener, hold/toggle, key aliases
 ├── transcribe/
 │   ├── base.py            # BaseTranscriber Protocol, KeyHandle, error taxonomy
@@ -343,11 +372,14 @@ speako/
 │       └── faster.py      # Intel/AMD
 ├── output/
 │   └── injector.py        # clipboard + paste (Cmd/Ctrl+V) or type
+├── ui/
+│   ├── events.py          # HudState + event dataclasses (no Tk import)
+│   └── hud.py             # Tkinter frameless pill: dot+bars / spinner / check
 └── util/
     ├── logging.py         # StructuredLogger + JSON formatter
     └── notify.py          # osascript / notify-send
 
-tests/                     # pytest (28 tests, no network, no audio device required)
+tests/                     # pytest (45 tests, no network / audio / display required)
 ```
 
 ## Contributing

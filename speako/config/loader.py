@@ -28,6 +28,7 @@ from .models import (
     GroqProviderConfig,
     HotkeyConfig,
     HotkeyMode,
+    HudPosition,
     LocalProviderConfig,
     LogFormat,
     LoggingConfig,
@@ -36,6 +37,7 @@ from .models import (
     OutputMethod,
     ProviderId,
     ProvidersConfig,
+    UIConfig,
 )
 
 
@@ -76,6 +78,12 @@ _DEFAULTS: Final[dict[str, Any]] = {
         "level": "INFO",
         "format": "json",
     },
+    "ui": {
+        "enabled": True,
+        "position": "bottom_center",
+        "margin_px": 80,
+        "opacity": 0.92,
+    },
 }
 
 _USER_CONFIG_PATH: Final[Path] = Path.home() / ".config" / "speako" / "config.yaml"
@@ -85,6 +93,7 @@ _VALID_LOG_LEVELS: Final[frozenset[str]] = frozenset(
     {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 )
 _VALID_LOG_FORMATS: Final[frozenset[str]] = frozenset({"json", "text"})
+_VALID_HUD_POSITIONS: Final[frozenset[str]] = frozenset({"bottom_center", "top_center"})
 
 
 def load_config(
@@ -191,6 +200,7 @@ def _build_config(raw: dict[str, Any], source_paths: tuple[str, ...]) -> AppConf
         output=_build_output(_require_mapping(raw, "output")),
         cooldown=_build_cooldown(_require_mapping(raw, "cooldown")),
         logging=_build_logging(_require_mapping(raw, "logging")),
+        ui=_build_ui(_require_mapping(raw, "ui")),
         source_paths=source_paths,
     )
 
@@ -291,7 +301,7 @@ def _build_hotkey(raw: dict[str, Any]) -> HotkeyConfig:
     mode = str(raw.get("mode", "hold")).lower()
     if mode not in _VALID_HOTKEY_MODES:
         raise ConfigError(f"hotkey.mode must be one of {sorted(_VALID_HOTKEY_MODES)}")
-    return HotkeyConfig(key=key, mode=cast("HotkeyMode", mode))
+    return HotkeyConfig(key=key, mode=cast(HotkeyMode, mode))
 
 
 def _build_output(raw: dict[str, Any]) -> OutputConfig:
@@ -299,7 +309,7 @@ def _build_output(raw: dict[str, Any]) -> OutputConfig:
     if method not in _VALID_OUTPUT_METHODS:
         raise ConfigError(f"output.method must be one of {sorted(_VALID_OUTPUT_METHODS)}")
     return OutputConfig(
-        method=cast("OutputMethod", method),
+        method=cast(OutputMethod, method),
         restore_clipboard=bool(raw.get("restore_clipboard", True)),
     )
 
@@ -320,7 +330,25 @@ def _build_logging(raw: dict[str, Any]) -> LoggingConfig:
         raise ConfigError(f"logging.level must be one of {sorted(_VALID_LOG_LEVELS)}")
     if fmt not in _VALID_LOG_FORMATS:
         raise ConfigError(f"logging.format must be one of {sorted(_VALID_LOG_FORMATS)}")
-    return LoggingConfig(level=cast("LogLevel", level), format=cast("LogFormat", fmt))
+    return LoggingConfig(level=cast(LogLevel, level), format=cast(LogFormat, fmt))
+
+
+def _build_ui(raw: dict[str, Any]) -> UIConfig:
+    position = str(raw.get("position", "bottom_center")).lower()
+    if position not in _VALID_HUD_POSITIONS:
+        raise ConfigError(f"ui.position must be one of {sorted(_VALID_HUD_POSITIONS)}")
+    margin_px = int(raw.get("margin_px", 80))
+    opacity = float(raw.get("opacity", 0.92))
+    if margin_px < 0:
+        raise ConfigError("ui.margin_px must be >= 0")
+    if not 0.0 <= opacity <= 1.0:
+        raise ConfigError("ui.opacity must be in [0.0, 1.0]")
+    return UIConfig(
+        enabled=bool(raw.get("enabled", True)),
+        position=cast(HudPosition, position),
+        margin_px=margin_px,
+        opacity=opacity,
+    )
 
 
 def _resolve_keys(env_var: str) -> tuple[str, ...]:

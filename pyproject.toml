@@ -57,6 +57,7 @@ module = [
     "groq.*",
     "google",
     "google.*",
+    "AppKit",           # pyobjc — installed by pynput on macOS, stub-free
 ]
 ignore_missing_imports = true
 
@@ -80,6 +81,9 @@ ignore = ["PLR0911", "PLR0913"]
 "speako/transcribe/local/factory.py" = ["PLC0415"]
 "speako/transcribe/local/mlx.py" = ["PLC0415"]
 "speako/transcribe/local/faster.py" = ["PLC0415"]
+# Rendering helpers take pixel coords — too many named args would obscure them.
+# pyobjc AppKit is imported lazily so speako parses on non-macOS platforms.
+"speako/ui/hud.py" = ["PLR0917", "PLC0415"]
 # Tests: literal magic values and long lines are readable in-context.
 "tests/*" = ["PLR2004", "E501"]
 

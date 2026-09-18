@@ -58,8 +58,11 @@ class GroqTranscriber:
         except Exception as exc:  # SDK-specific; mapped below
             raise self._map_error(exc) from exc
 
-        # `result` is a plain string when response_format="text".
-        text = result if isinstance(result, str) else getattr(result, "text", "")
+        # With response_format="text" the SDK returns a bare string; the
+        # typed SDK annotation still says Transcription, so cast through
+        # ``object`` to keep the isinstance branches meaningful to mypy.
+        raw: object = result
+        text = raw if isinstance(raw, str) else str(getattr(raw, "text", ""))
         elapsed_ms = (time.monotonic_ns() - started) // 1_000_000
         return Transcript(
             text=text.strip(),
