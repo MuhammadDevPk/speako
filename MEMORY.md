@@ -35,8 +35,9 @@ End-to-end smoke test on real hardware with the HUD live: install system Tk (`br
 - **AD-008 — `StructuredLogger` wrapper over stdlib `logging`.**
   Rationale: stdlib `Logger.warning(msg, foo=bar)` raises. Wrapper promotes non-passthrough kwargs to `extra=`. Code: `speako/util/logging.py`.
 
-- **AD-009 — Drop-oldest bounded queues on hot paths.**
-  Frame queue, hotkey sink queue, RMS `level_sink` queue, and `hud_events` queue all use `put_nowait` and drop-oldest on overflow. Never block the audio driver / pynput / Tk polling threads.
+- **AD-009 — Drop-oldest bounded queues on hot paths (with one exception).**
+  Hotkey sink queue, RMS `level_sink` queue, and `hud_events` queue all use `put_nowait` and drop-oldest on overflow. Never block the pynput / Tk polling threads.
+  **Exception:** the audio capture queue is unbounded during a single capture and uses drop-*newest* at the `max_seconds` cap — see AD-022 for why drop-oldest was wrong there.
 
 - **AD-010 — Python ≥ 3.12, use `uv` for env/deps.**
   Numpy 2.5+ requires 3.12 (uses `type` statements in stubs).
@@ -75,6 +76,17 @@ End-to-end smoke test on real hardware with the HUD live: install system Tk (`br
 
 - **AD-021 — macOS process is downgraded to `NSApplicationActivationPolicyAccessory`.**
   Setting NSWindow `collectionBehavior` alone is **not enough**. The moment `Tk()` runs, Cocoa promotes the Python process to a `Regular` (foreground GUI) application. Every subsequent HUD update is then treated by macOS as a foreground-app event that must occur on the app's origin Space — which drags the user back whenever the HUD state changes. Fix: call `NSApplication.sharedApplication().setActivationPolicy_(NSApplicationActivationPolicyAccessory)` (value 1) **before** the NSWindow config. `Accessory` = background agent: no Dock icon, no Cmd-Tab entry, no Space bindings. The window's `collectionBehavior` still governs where it appears; the process policy governs whether macOS thinks a Space change is warranted when it updates. Both are required together. Verified: `activationPolicy()` transitions from 2 (Prohibited) to 1 (Accessory) after the call.
+
+- **AD-022 — Audio capture queue: unbounded + drop-*newest* at the cap.**
+  Original design (per AD-009) used a bounded `queue.Queue` with drop-*oldest* on overflow. The maxsize was sized as `20 chunks/s × max_seconds` = 2400 chunks at defaults, but sounddevice's default macOS blocksize (~256 samples at 16 kHz) yields ~62 chunks/s. Queue filled after ~38 s; every subsequent chunk pushed the oldest one out. **Symptom:** users speaking longer than ~38 s got only the last few words transcribed while the HUD kept showing LISTENING — the state machine was fine, but the pipeline was silently truncating the *start* of the recording.
+
+  Fix (in `speako/audio/capturer.py`):
+  * Queue is unbounded — `put_nowait` on an unbounded queue never raises.
+  * Memory is bounded by counting samples inside the callback: once `buffered_samples >= sample_rate × max_seconds` we drop **newest** chunks (the tail past the cap) and log once via `audio_max_seconds_reached`.
+  * Level publication still runs for every chunk (even past the cap) so the HUD bars keep responding to the user's voice.
+  * `_dropped_at_cap` counter is emitted at `end_capture` time as `audio_capture_truncated_at_max_seconds` so operators can tell when the cap was hit.
+
+  Trade-off: user speaking longer than `max_seconds` loses the tail rather than the start. Truncated-tail is far less confusing than truncated-start ("only my last sentence appeared" vs "everything I said appeared, but it cut off at 2 minutes"). Users needing longer captures raise `audio.max_seconds` in config.
 
 ## Completed
 - [x] Scaffolding: `pyproject.toml` (per-provider extras + dev), `.gitignore`, `.env.example`, `config.yaml.example`, `README.md`, `LICENSE`.
