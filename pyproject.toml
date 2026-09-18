@@ -1,0 +1,88 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "speako"
+version = "0.1.0"
+description = "High-performance Push-to-Talk speech-to-text with provider rotation and local fallback."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [{ name = "Malik Muhammad Awan" }]
+
+dependencies = [
+    "numpy>=1.26",
+    "sounddevice>=0.4.7",
+    "pynput>=1.7.7",
+    "pyperclip>=1.9",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+groq = ["groq>=0.11"]
+gemini = ["google-genai>=1.0"]
+mlx = ["mlx-whisper>=0.4"]
+faster = ["faster-whisper>=1.0"]
+dev = [
+    "mypy>=1.11",
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+    "types-PyYAML>=6.0",
+]
+
+[project.scripts]
+speako = "speako.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["speako"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+warn_unused_ignores = true
+disallow_any_generics = true
+
+[[tool.mypy.overrides]]
+module = [
+    "sounddevice",
+    "pynput.*",
+    "pyperclip",
+    "mlx_whisper",
+    "faster_whisper",
+    "groq",
+    "groq.*",
+    "google",
+    "google.*",
+]
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RET", "PL"]
+# TCH/TC rules skipped: many imports are used at runtime (isinstance, dataclass
+# field types) and rewriting them under TYPE_CHECKING would break execution.
+# PLR0911: error-mapping switches naturally have many returns.
+# PLR0913: some constructors take many typed config fields.
+ignore = ["PLR0911", "PLR0913"]
+
+[tool.ruff.lint.per-file-ignores]
+# Lazy SDK imports guard optional-extra deps; global flag is idempotent config.
+"speako/util/logging.py" = ["PLW0603"]
+"speako/transcribe/groq_engine.py" = ["PLC0415"]
+"speako/transcribe/gemini_engine.py" = ["PLC0415"]
+"speako/transcribe/local/factory.py" = ["PLC0415"]
+"speako/transcribe/local/mlx.py" = ["PLC0415"]
+"speako/transcribe/local/faster.py" = ["PLC0415"]
+# Tests: literal magic values and long lines are readable in-context.
+"tests/*" = ["PLR2004", "E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"

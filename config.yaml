@@ -1,0 +1,49 @@
+# speako — configuration
+# Copy to config.yaml (project) or ~/.config/speako/config.yaml (user).
+# Environment variables and CLI flags override values set here.
+# Secrets (API keys) are NEVER read from this file; they live in .env only.
+
+providers:
+  # Ordered dispatch chain. Local is always safe to include as the terminal
+  # fallback because it has no key requirement.
+  priority: [groq, gemini, local]
+
+  groq:
+    model: whisper-large-v3-turbo
+    api_keys_env: GROQ_API_KEYS
+
+  gemini:
+    model: gemini-2.0-flash
+    api_keys_env: GEMINI_API_KEYS
+
+  local:
+    # Model id understood by the selected engine.
+    #   mlx-whisper:    e.g. "mlx-community/whisper-large-v3-turbo"
+    #   faster-whisper: e.g. "large-v3-turbo"
+    model: large-v3-turbo
+    compute_type: int8  # faster-whisper only; ignored by mlx
+
+audio:
+  sample_rate: 16000   # Whisper family expects 16 kHz mono
+  channels: 1
+  device: null         # null → system default input
+  max_seconds: 120     # hard cap per capture
+
+hotkey:
+  # Key name understood by pynput. Common values:
+  #   right_option, right_ctrl, right_shift, right_cmd, f13..f24, caps_lock
+  key: right_option
+  mode: hold           # "hold" (press-and-hold) or "toggle" (tap on / tap off)
+
+output:
+  method: paste            # "paste" (clipboard + Cmd/Ctrl+V) or "type" (character-by-character)
+  restore_clipboard: true  # only relevant for method=paste
+
+cooldown:
+  initial_seconds: 30
+  factor: 4
+  max_seconds: 600
+
+logging:
+  level: INFO
+  format: json           # "json" or "text"
