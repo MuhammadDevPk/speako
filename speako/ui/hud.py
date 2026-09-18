@@ -353,11 +353,23 @@ class Hud:
 def _apply_platform_hud_behavior(root: tk.Tk) -> None:
     """Configure the underlying OS window as a proper HUD.
 
-    On macOS: use ``pyobjc`` to set the ``NSWindow`` collectionBehavior
-    (join all Spaces, appear over fullscreen apps, skip window-cycle),
-    raise the window level to the status-item tier, and enable
-    ``ignoresMouseEvents`` so clicks pass through. Called once, after
-    the window has been realized on the Cocoa layer.
+    On macOS this does two things:
+
+    1. **Downgrades the entire Python process** to ``Accessory`` via
+       ``NSApplication.setActivationPolicy_``. Without this, the process
+       is a ``Regular`` GUI app (Cocoa upgrades any Tk program to
+       Regular the moment ``Tk()`` runs) and macOS treats every HUD
+       update as a foreground-app event that must occur on the app's
+       origin Space — dragging the user back. ``Accessory`` = background
+       agent: no Dock icon, no Cmd-Tab entry, no Space bindings.
+    2. **Sets ``NSWindow`` collectionBehavior + level + ignoresMouseEvents**
+       via ``pyobjc`` (installed transitively via pynput) so the HUD
+       joins every Space, floats over fullscreen apps, and passes
+       clicks through to whatever is below.
+
+    The activation-policy change is applied *before* the window config
+    because it affects the whole process; the window config only
+    applies to our one NSWindow.
 
     On other platforms this is a no-op — Linux/Windows already get the
     right behavior from ``overrideredirect`` + ``-topmost`` + ``-type``.
@@ -368,7 +380,9 @@ def _apply_platform_hud_behavior(root: tk.Tk) -> None:
     try:
         from AppKit import (
             NSApp,
-            NSStatusWindowLevel,
+            NSApplication,
+            NSApplicationActivationPolicyAccessory,
+            NSPopUpMenuWindowLevel,
             NSWindowCollectionBehaviorCanJoinAllSpaces,
             NSWindowCollectionBehaviorFullScreenAuxiliary,
             NSWindowCollectionBehaviorIgnoresCycle,
@@ -378,9 +392,24 @@ def _apply_platform_hud_behavior(root: tk.Tk) -> None:
         _log.warning("pyobjc_missing_hud_will_not_follow_spaces")
         return
 
+    # Step 1 — process-wide: become a background agent so macOS stops
+    # yanking the current Space back to the HUD's origin on every update.
+    app = NSApplication.sharedApplication()
+    app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+    resolved_policy = int(app.activationPolicy())
+
+    # Step 2 — window-specific: join every Space, sit above every other
+    # app's windows *including their fullscreen windows*.
+    #
+    # Level choice: NSStatusWindowLevel (25) is enough for regular windows,
+    # but macOS puts another app's fullscreen Space above status level.
+    # NSPopUpMenuWindowLevel (101) is the standard trick used by menu-bar
+    # utilities (Rectangle, Bartender, Karabiner HUD, ...) to render over
+    # any other app's fullscreen window. Going higher (screensaver = 1000)
+    # would also cover the system menu bar, which we don't want.
     ns_window = _find_ns_window(NSApp, _WINDOW_TITLE)
     if ns_window is None:
-        _log.warning("hud_ns_window_not_found")
+        _log.warning("hud_ns_window_not_found", activation_policy=resolved_policy)
         return
 
     behavior = (
@@ -390,10 +419,11 @@ def _apply_platform_hud_behavior(root: tk.Tk) -> None:
         | NSWindowCollectionBehaviorFullScreenAuxiliary
     )
     ns_window.setCollectionBehavior_(behavior)
-    ns_window.setLevel_(NSStatusWindowLevel)
+    ns_window.setLevel_(NSPopUpMenuWindowLevel)
     ns_window.setIgnoresMouseEvents_(True)
     _log.info(
         "hud_macos_configured",
+        activation_policy=resolved_policy,   # 1 = Accessory, 0 = Regular, 2 = Prohibited
         level=int(ns_window.level()),
         behavior=int(behavior),
     )
