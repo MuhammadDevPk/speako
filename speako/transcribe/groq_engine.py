@@ -6,6 +6,7 @@ installed when the provider isn't in the priority chain.
 
 from __future__ import annotations
 
+import importlib.util
 import time
 from typing import TYPE_CHECKING, Final
 
@@ -37,12 +38,10 @@ class GroqTranscriber:
 
     def __init__(self, model: str) -> None:
         self.model = model
-        try:
-            import groq  # noqa: F401 — presence check
-        except ImportError as exc:  # pragma: no cover - trivial import guard
+        if importlib.util.find_spec("groq") is None:  # pragma: no cover
             raise RuntimeError(
-                "Groq provider requires the `groq` extra: pip install speako[groq]"
-            ) from exc
+                "Groq provider requires the `groq` extra: uv sync --extra groq"
+            )
 
     def transcribe(self, clip: AudioClip, key: KeyHandle | None) -> Transcript:
         if key is None:

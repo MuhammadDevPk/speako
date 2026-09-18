@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import time
 from typing import TYPE_CHECKING, Final
 
@@ -11,7 +12,8 @@ from ...util.logging import get_logger
 from ..base import FatalProviderError, KeyHandle, Transcript, TransientProviderError
 
 if TYPE_CHECKING:
-    from faster_whisper import WhisperModel
+    # Only referenced for typing; presence is checked separately via find_spec.
+    from faster_whisper import WhisperModel  # pyright: ignore[reportMissingImports]
 
 _log: Final = get_logger(__name__)
 
@@ -23,14 +25,12 @@ class FasterWhisperTranscriber:
         self.model = model
         self._compute_type = compute_type
         self._instance: WhisperModel | None = None
-        try:
-            import faster_whisper  # noqa: F401
-        except ImportError as exc:  # pragma: no cover
+        if importlib.util.find_spec("faster_whisper") is None:  # pragma: no cover
             raise RuntimeError(
-                "faster-whisper is required on x86_64: pip install speako[faster]"
-            ) from exc
+                "faster-whisper is required on x86_64: uv sync --extra faster"
+            )
 
-    def transcribe(self, clip: AudioClip, key: KeyHandle | None) -> Transcript:
+    def transcribe(self, clip: AudioClip, _key: KeyHandle | None) -> Transcript:
         model = self._ensure_loaded()
         audio = clip.as_mono_float32()
         started = time.monotonic_ns()
@@ -52,7 +52,7 @@ class FasterWhisperTranscriber:
 
     def _ensure_loaded(self) -> WhisperModel:
         if self._instance is None:
-            from faster_whisper import WhisperModel
+            from faster_whisper import WhisperModel  # pyright: ignore[reportMissingImports]
             self._instance = WhisperModel(
                 self.model,
                 device="auto",

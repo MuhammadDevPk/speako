@@ -90,3 +90,57 @@ ignore = ["PLR0911", "PLR0913"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+
+# ---------------------------------------------------------------------------
+# Editor tooling
+# ---------------------------------------------------------------------------
+# The canonical correctness gate is `uv run ruff check` + `uv run mypy --strict`.
+# The blocks below tell Pylint and Pyright about our documented conventions
+# so editors (VS Code, Cursor) stop flagging noise on:
+#   * intentional lazy imports guarding optional per-hardware extras,
+#   * dataclass-only modules that we deliberately leave un-docstringed
+#     (per AGENT.md — "no unnecessary comments"),
+#   * Protocol-required parameters that a given implementation ignores.
+# Neither Pylint nor Pyright is required to pass — they exist to keep the
+# editor quiet. All disables map to a real, documented convention.
+
+[tool.pylint.main]
+py-version = "3.12"
+# Optional backends that are only importable on specific hardware. Without
+# this list Pylint would flag every reference as E0401 on Intel Mac,
+# every reference as E0401 for the other one on Apple Silicon, etc.
+ignored-modules = [
+    "mlx_whisper",
+    "faster_whisper",
+    "AppKit",
+]
+
+[tool.pylint."messages control"]
+disable = [
+    "missing-module-docstring",        # C0114
+    "missing-class-docstring",         # C0115  — dataclasses stay undocumented per AGENT.md
+    "missing-function-docstring",      # C0116  — same
+    "import-outside-toplevel",         # C0415  — lazy imports guard optional deps
+    "too-few-public-methods",          # R0903  — dataclasses
+    "too-many-instance-attributes",    # R0902
+    "too-many-arguments",              # R0913  — duplicates ruff PLR0913
+    "too-many-positional-arguments",   # R0917  — duplicates ruff PLR0917
+    "line-too-long",                   # C0301  — ruff E501 owns line length
+    "duplicate-code",                  # R0801  — noisy across similar test setup
+    "unused-argument",                 # W0613  — protocol-required params (also use _prefix)
+    "fixme",                           # W0511  — TODO/FIXME are OK during dev
+    "too-many-return-statements",      # R0911  — error-mapping switches are naturally many-return
+    "broad-exception-caught",          # W0718  — allowed at process/UX boundaries per AGENT.md §6
+    "global-statement",                # W0603  — one intentional global flag in util/logging.py
+]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
+# Optional-extra backends may not be installed on every dev machine (e.g.
+# mlx-whisper on Intel, faster-whisper on macOS x86_64 without onnxruntime).
+# Downgrade from "error" so Pylance shows a hint but doesn't red-underline
+# every provider file. Real missing-import bugs will still surface as warnings.
+reportMissingImports = "warning"
+reportMissingTypeStubs = "none"

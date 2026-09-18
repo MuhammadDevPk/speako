@@ -32,11 +32,16 @@ class AudioClip:
         """Encode as 16-bit PCM WAV. Suitable for Groq/Gemini upload."""
         pcm16 = _float32_to_pcm16(self.samples)
         buf = io.BytesIO()
+        # Pylint can't follow wave.open's mode-based return-type overload
+        # (it always infers Wave_read); mypy's overload for "wb" resolves
+        # to Wave_write correctly, so those calls really do exist.
+        # pylint: disable=no-member
         with wave.open(buf, "wb") as wav:
             wav.setnchannels(self.channels)
             wav.setsampwidth(2)  # 16-bit
             wav.setframerate(self.sample_rate)
             wav.writeframes(pcm16.tobytes())
+        # pylint: enable=no-member
         return buf.getvalue()
 
     def as_mono_float32(self) -> NDArray[np.float32]:

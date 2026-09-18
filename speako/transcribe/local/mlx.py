@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import time
 from typing import Any, Final, cast
 
@@ -18,21 +19,19 @@ class MLXWhisperTranscriber:
 
     def __init__(self, model: str) -> None:
         self.model = model
-        try:
-            import mlx_whisper  # noqa: F401
-        except ImportError as exc:  # pragma: no cover
+        if importlib.util.find_spec("mlx_whisper") is None:  # pragma: no cover
             raise RuntimeError(
-                "mlx-whisper is required on Apple Silicon: pip install speako[mlx]"
-            ) from exc
+                "mlx-whisper is required on Apple Silicon: uv sync --extra mlx"
+            )
 
-    def transcribe(self, clip: AudioClip, key: KeyHandle | None) -> Transcript:
-        import mlx_whisper
+    def transcribe(self, clip: AudioClip, _key: KeyHandle | None) -> Transcript:
+        import mlx_whisper  # pyright: ignore[reportMissingImports]
 
         audio = clip.as_mono_float32()
         started = time.monotonic_ns()
         try:
             result = cast(
-                "dict[str, Any]",
+                dict[str, Any],
                 mlx_whisper.transcribe(audio, path_or_hf_repo=self.model),
             )
         except FileNotFoundError as exc:

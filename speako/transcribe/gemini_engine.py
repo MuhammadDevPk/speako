@@ -7,6 +7,7 @@ was deprecated in 2024–2025). Sends WAV audio inline as bytes; a 120-second
 
 from __future__ import annotations
 
+import importlib.util
 import time
 from typing import Final
 
@@ -42,13 +43,11 @@ class GeminiTranscriber:
 
     def __init__(self, model: str) -> None:
         self.model = model
-        try:
-            import google.genai  # noqa: F401 — presence check
-        except ImportError as exc:  # pragma: no cover
+        if importlib.util.find_spec("google.genai") is None:  # pragma: no cover
             raise RuntimeError(
                 "Gemini provider requires the `gemini` extra: "
                 "uv sync --extra gemini"
-            ) from exc
+            )
 
     def transcribe(self, clip: AudioClip, key: KeyHandle | None) -> Transcript:
         if key is None:
