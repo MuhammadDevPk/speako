@@ -47,13 +47,25 @@ class ConfigError(ValueError):
 
 _DEFAULTS: Final[dict[str, Any]] = {
     "providers": {
-        "priority": ["local"],
-        "groq": None,
-        "gemini": None,
-        "local": {
-            "model": "large-v3-turbo",
-            "compute_type": "int8",
+        "priority": ["groq", "gemini"],
+        "groq": {
+            "model": "whisper-large-v3",
+            "api_keys_env": "GROQ_API_KEYS",
+            "prompt": (
+                "Accurate speech transcription with proper spelling, capitalization, and punctuation."
+            ),
+            "language": None,
         },
+        "gemini": {
+            "model": "gemini-2.5-flash",
+            "api_keys_env": "GEMINI_API_KEYS",
+            "prompt": (
+                "Transcribe the spoken audio in this clip exactly. Do not add any greeting, "
+                "answers, explanations, or comments. Return only the verbatim transcription text "
+                "without quotes or markdown formatting."
+            ),
+        },
+        "local": None,
     },
     "audio": {
         "sample_rate": 16000,
@@ -62,7 +74,7 @@ _DEFAULTS: Final[dict[str, Any]] = {
         "max_seconds": 120,
     },
     "hotkey": {
-        "key": "right_option",
+        "key": "option",
         "mode": "hold",
     },
     "output": {
@@ -100,6 +112,7 @@ def load_config(
     project_config: Path | str | None = None,
     overrides: dict[str, Any] | None = None,
     load_env: bool = True,
+    user_config: Path | str | bool | None = True,
 ) -> AppConfig:
     """Load and validate configuration.
 
@@ -108,6 +121,7 @@ def load_config(
             ``./config.yaml`` (if it exists) or the ``SPEAKO_CONFIG`` env var.
         overrides: Nested dict merged last (typically from CLI flags).
         load_env: If True (default), read ``.env`` in CWD into ``os.environ``.
+        user_config: User config path, True for default path, or False to skip.
     """
     if load_env:
         load_dotenv(override=False)
@@ -120,9 +134,12 @@ def load_config(
         _deep_merge(merged, _read_yaml(project_path))
         source_paths.append(str(project_path))
 
-    if _USER_CONFIG_PATH.exists():
-        _deep_merge(merged, _read_yaml(_USER_CONFIG_PATH))
-        source_paths.append(str(_USER_CONFIG_PATH))
+    user_config_path: Path | None = (
+        _USER_CONFIG_PATH if user_config is True else (Path(user_config) if user_config else None)
+    )
+    if user_config_path is not None and user_config_path.exists():
+        _deep_merge(merged, _read_yaml(user_config_path))
+        source_paths.append(str(user_config_path))
 
     _apply_env_overrides(merged)
 
@@ -213,26 +230,34 @@ def _build_providers(raw: dict[str, Any]) -> ProvidersConfig:
     priority: list[ProviderId] = []
     for name in priority_raw:
         try:
-            priority.append(ProviderId(name))
+            pid = ProviderId(name)
         except ValueError as exc:
             raise ConfigError(f"unknown provider in priority: {name!r}") from exc
 
+        if pid is ProviderId.LOCAL:
+            # Local models (Intel / M1) are disabled in favor of ultra-accurate API transcription
+            continue
+        priority.append(pid)
+
+    if not priority:
+        raise ConfigError(
+            "no valid API providers configured in priority; local models (M1/Intel) are disabled. "
+            "Please configure [groq, gemini] with API keys."
+        )
+
     groq = _build_groq(raw.get("groq")) if ProviderId.GROQ in priority else None
     gemini = _build_gemini(raw.get("gemini")) if ProviderId.GEMINI in priority else None
-    local = _build_local(raw.get("local")) if ProviderId.LOCAL in priority else None
 
     if ProviderId.GROQ in priority and groq is None:
         raise ConfigError("providers.groq config required when groq is in priority")
     if ProviderId.GEMINI in priority and gemini is None:
         raise ConfigError("providers.gemini config required when gemini is in priority")
-    if ProviderId.LOCAL in priority and local is None:
-        raise ConfigError("providers.local config required when local is in priority")
 
     return ProvidersConfig(
         priority=tuple(priority),
         groq=groq,
         gemini=gemini,
-        local=local,
+        local=None,
     )
 
 
@@ -243,10 +268,14 @@ def _build_groq(raw: Any) -> GroqProviderConfig | None:
         raise ConfigError("providers.groq must be a mapping")
     model = _require_str(raw, "model", "providers.groq")
     keys_env = _require_str(raw, "api_keys_env", "providers.groq")
+    prompt = raw.get("prompt")
+    language = raw.get("language")
     return GroqProviderConfig(
         model=model,
         api_keys_env=keys_env,
         api_keys=_resolve_keys(keys_env),
+        prompt=str(prompt) if prompt is not None else None,
+        language=str(language) if language is not None else None,
     )
 
 
@@ -257,10 +286,12 @@ def _build_gemini(raw: Any) -> GeminiProviderConfig | None:
         raise ConfigError("providers.gemini must be a mapping")
     model = _require_str(raw, "model", "providers.gemini")
     keys_env = _require_str(raw, "api_keys_env", "providers.gemini")
+    prompt = raw.get("prompt")
     return GeminiProviderConfig(
         model=model,
         api_keys_env=keys_env,
         api_keys=_resolve_keys(keys_env),
+        prompt=str(prompt) if prompt is not None else None,
     )
 
 

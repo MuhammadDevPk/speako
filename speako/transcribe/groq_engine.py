@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import time
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from ..audio.clip import AudioClip
 from ..config import ProviderId
@@ -28,6 +28,10 @@ if TYPE_CHECKING:
 
 _log: Final = get_logger(__name__)
 
+_DEFAULT_PROMPT: Final[str] = (
+    "Accurate verbatim speech transcription with correct spelling, capitalization, and punctuation."
+)
+
 _HTTP_PAYMENT_REQUIRED: Final[int] = 402
 _HTTP_TRANSIENT: Final[frozenset[int]] = frozenset({500, 502, 503, 504})
 _HTTP_FATAL_CLIENT: Final[frozenset[int]] = frozenset({400, 415, 422})
@@ -36,8 +40,15 @@ _HTTP_FATAL_CLIENT: Final[frozenset[int]] = frozenset({400, 415, 422})
 class GroqTranscriber:
     provider: ProviderId = ProviderId.GROQ
 
-    def __init__(self, model: str) -> None:
+    def __init__(
+        self,
+        model: str = "whisper-large-v3",
+        prompt: str | None = None,
+        language: str | None = None,
+    ) -> None:
         self.model = model
+        self.prompt = prompt or _DEFAULT_PROMPT
+        self.language = language
         if importlib.util.find_spec("groq") is None:  # pragma: no cover
             raise RuntimeError(
                 "Groq provider requires the `groq` extra: uv sync --extra groq"
@@ -48,20 +59,31 @@ class GroqTranscriber:
             raise FatalProviderError("Groq requires an API key", self.provider)
         client = self._client(key.value)
         started = time.monotonic_ns()
+        normalized_clip = clip.normalize()
         try:
-            result = client.audio.transcriptions.create(
-                file=("audio.wav", clip.to_wav_bytes(), "audio/wav"),
-                model=self.model,
-                response_format="text",
-            )
+            kwargs: dict[str, Any] = {
+                "file": ("audio.wav", normalized_clip.to_wav_bytes(), "audio/wav"),
+                "model": self.model,
+                "response_format": "json",
+                "temperature": 0.0,
+            }
+            if self.prompt:
+                kwargs["prompt"] = self.prompt
+            if self.language:
+                kwargs["language"] = self.language
+
+            result = client.audio.transcriptions.create(**kwargs)
         except Exception as exc:  # SDK-specific; mapped below
             raise self._map_error(exc) from exc
 
-        # With response_format="text" the SDK returns a bare string; the
-        # typed SDK annotation still says Transcription, so cast through
-        # ``object`` to keep the isinstance branches meaningful to mypy.
         raw: object = result
-        text = raw if isinstance(raw, str) else str(getattr(raw, "text", ""))
+        if isinstance(raw, str):
+            text = raw
+        elif isinstance(raw, dict):
+            text = str(raw.get("text", ""))
+        else:
+            text = str(getattr(raw, "text", ""))
+
         elapsed_ms = (time.monotonic_ns() - started) // 1_000_000
         return Transcript(
             text=text.strip(),

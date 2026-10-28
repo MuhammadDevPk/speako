@@ -48,3 +48,14 @@ def test_as_mono_from_stereo_averages_channels() -> None:
     clip = AudioClip(samples=samples, sample_rate=16000, channels=2)
     mono = clip.as_mono_float32()
     np.testing.assert_allclose(mono, [0.0, 0.5, 0.3], atol=1e-6)
+
+
+def test_normalize_boosts_quiet_speech_and_removes_dc() -> None:
+    # Quiet speech with DC offset: peak 0.10, DC offset 0.01
+    samples = np.array([0.01, 0.11, -0.09], dtype=np.float32)
+    clip = AudioClip(samples=samples, sample_rate=16000, channels=1)
+    normalized = clip.normalize(target_peak=0.95)
+    # Centered: [-0.00, 0.10, -0.10] -> max amp 0.10
+    # Boosted: 0.10 * (0.95 / 0.10) = 0.95
+    assert np.isclose(np.mean(normalized.samples), 0.0, atol=1e-6)
+    assert np.isclose(np.max(np.abs(normalized.samples)), 0.95, atol=1e-5)

@@ -18,7 +18,6 @@ from .output import OutputInjector
 from .transcribe import BaseTranscriber, KeyManager, TranscriberDispatcher
 from .transcribe.gemini_engine import GeminiTranscriber
 from .transcribe.groq_engine import GroqTranscriber
-from .transcribe.local import LocalEngineFactory, UnsupportedHardwareError
 from .ui import HudEvent, HudLevelEvent
 from .util.logging import get_logger
 
@@ -106,21 +105,32 @@ def _build_transcribers(config: AppConfig) -> dict[ProviderId, BaseTranscriber]:
 
     if providers.groq is not None and ProviderId.GROQ in providers.priority:
         try:
-            out[ProviderId.GROQ] = GroqTranscriber(model=providers.groq.model)
+            out[ProviderId.GROQ] = GroqTranscriber(
+                model=providers.groq.model,
+                prompt=providers.groq.prompt,
+                language=providers.groq.language,
+            )
         except RuntimeError as exc:
             _log.warning("provider_disabled", provider="groq", reason=str(exc))
 
     if providers.gemini is not None and ProviderId.GEMINI in providers.priority:
         try:
-            out[ProviderId.GEMINI] = GeminiTranscriber(model=providers.gemini.model)
+            out[ProviderId.GEMINI] = GeminiTranscriber(
+                model=providers.gemini.model,
+                prompt=providers.gemini.prompt,
+            )
         except RuntimeError as exc:
             _log.warning("provider_disabled", provider="gemini", reason=str(exc))
 
-    if providers.local is not None and ProviderId.LOCAL in providers.priority:
-        try:
-            out[ProviderId.LOCAL] = LocalEngineFactory.detect(providers.local)
-        except (RuntimeError, UnsupportedHardwareError) as exc:
-            _log.warning("provider_disabled", provider="local", reason=str(exc))
+    if ProviderId.LOCAL in providers.priority:
+        _log.warning(
+            "provider_disabled",
+            provider="local",
+            reason=(
+                "Local models (M1/Intel) are disabled. "
+                "Speako is operating in high-accuracy API mode (Groq/Gemini)."
+            ),
+        )
 
     return out
 

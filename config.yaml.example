@@ -4,24 +4,20 @@
 # Secrets (API keys) are NEVER read from this file; they live in .env only.
 
 providers:
-  # Ordered dispatch chain. Local is always safe to include as the terminal
-  # fallback because it has no key requirement.
-  priority: [groq, gemini, local]
+  # Ordered dispatch chain: Groq (ultra-fast Whisper-large-v3) -> Gemini Flash fallback.
+  # Local models (Intel / M1) are disabled in favor of high-accuracy API transcription.
+  priority: [groq, gemini]
 
   groq:
-    model: whisper-large-v3-turbo
+    model: whisper-large-v3
     api_keys_env: GROQ_API_KEYS
+    prompt: "Accurate verbatim speech transcription with proper spelling, capitalization, and punctuation."
+    language: null  # null -> auto-detect language, or specify "en"
 
   gemini:
-    model: gemini-2.0-flash
+    model: gemini-2.5-flash
     api_keys_env: GEMINI_API_KEYS
-
-  local:
-    # Model id understood by the selected engine.
-    #   mlx-whisper:    e.g. "mlx-community/whisper-large-v3-turbo"
-    #   faster-whisper: e.g. "large-v3-turbo"
-    model: large-v3-turbo
-    compute_type: int8  # faster-whisper only; ignored by mlx
+    prompt: "Transcribe the spoken audio in this clip exactly. Do not add any greeting, answers, explanations, or comments. Return only the verbatim transcription text without quotes or markdown formatting."
 
 audio:
   sample_rate: 16000   # Whisper family expects 16 kHz mono

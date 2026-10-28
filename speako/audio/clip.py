@@ -10,8 +10,12 @@ import io
 import wave
 from dataclasses import dataclass
 
+from typing import Final
+
 import numpy as np
 from numpy.typing import NDArray
+
+_MIN_AMPLITUDE_THRESHOLD: Final[float] = 1e-4
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +54,25 @@ class AudioClip:
             return self.samples.reshape(-1).astype(np.float32, copy=False)
         reshaped = self.samples.reshape(-1, self.channels)
         return reshaped.mean(axis=1).astype(np.float32, copy=False)
+
+    def normalize(self, target_peak: float = 0.95, max_gain: float = 20.0) -> AudioClip:
+        """Return a gain-normalized copy of the clip with DC bias removed."""
+        if self.samples.size == 0:
+            return self
+        samples = self.samples.copy()
+        # Remove DC offset (center around 0.0)
+        mean_val = np.mean(samples, axis=0, keepdims=True)
+        centered = samples - mean_val
+        max_amp = float(np.max(np.abs(centered)))
+        if max_amp > _MIN_AMPLITUDE_THRESHOLD:
+            # Boost quiet speech up to target_peak (cap gain to avoid noise floor)
+            gain = min(target_peak / max_amp, max_gain)
+            centered = centered * gain
+        return AudioClip(
+            samples=centered.astype(np.float32),
+            sample_rate=self.sample_rate,
+            channels=self.channels,
+        )
 
 
 def _float32_to_pcm16(samples: NDArray[np.float32]) -> NDArray[np.int16]:

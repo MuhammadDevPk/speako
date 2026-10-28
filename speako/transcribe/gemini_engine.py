@@ -26,9 +26,10 @@ from .base import (
 
 _log: Final = get_logger(__name__)
 
-_PROMPT: Final[str] = (
-    "Transcribe the following audio verbatim. "
-    "Return only the transcription — no preamble, no commentary, no quotes."
+_DEFAULT_PROMPT: Final[str] = (
+    "Transcribe the spoken audio in this clip exactly. "
+    "Do not add any greeting, answers, explanations, or comments. "
+    "Return only the verbatim transcription text without quotes or markdown formatting."
 )
 
 _HTTP_UNAUTHORIZED: Final[frozenset[int]] = frozenset({401, 403})
@@ -41,8 +42,9 @@ _HTTP_FATAL_CLIENT: Final[frozenset[int]] = frozenset({400, 404, 415, 422})
 class GeminiTranscriber:
     provider: ProviderId = ProviderId.GEMINI
 
-    def __init__(self, model: str) -> None:
+    def __init__(self, model: str = "gemini-2.5-flash", prompt: str | None = None) -> None:
         self.model = model
+        self.prompt = prompt or _DEFAULT_PROMPT
         if importlib.util.find_spec("google.genai") is None:  # pragma: no cover
             raise RuntimeError(
                 "Gemini provider requires the `gemini` extra: "
@@ -57,9 +59,10 @@ class GeminiTranscriber:
         from google.genai import types
 
         client = genai.Client(api_key=key.value)
-        wav_bytes = clip.to_wav_bytes()
+        normalized_clip = clip.normalize()
+        wav_bytes = normalized_clip.to_wav_bytes()
         contents = [
-            _PROMPT,
+            self.prompt,
             types.Part.from_bytes(data=wav_bytes, mime_type="audio/wav"),
         ]
 
@@ -68,11 +71,24 @@ class GeminiTranscriber:
             response = client.models.generate_content(
                 model=self.model,
                 contents=contents,
+                config=types.GenerateContentConfig(
+                    temperature=0.0,
+                ),
             )
         except Exception as exc:
             raise self._map_error(exc) from exc
 
         text = (getattr(response, "text", None) or "").strip()
+        # Clean up any surrounding quotes or markdown code block formatting
+        if text.startswith("```") and text.endswith("```"):
+            text = text.strip("`").strip()
+            if text.startswith("text\n") or text.startswith("markdown\n"):
+                text = text.split("\n", 1)[1]
+        if (text.startswith('"') and text.endswith('"')) or (
+            text.startswith("'") and text.endswith("'")
+        ):
+            text = text[1:-1].strip()
+
         elapsed_ms = (time.monotonic_ns() - started) // 1_000_000
         return Transcript(
             text=text,

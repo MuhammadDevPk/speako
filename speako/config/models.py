@@ -29,6 +29,8 @@ class GroqProviderConfig:
     model: str
     api_keys_env: str
     api_keys: tuple[str, ...]  # resolved from env at load time
+    prompt: str | None = None
+    language: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +38,7 @@ class GeminiProviderConfig:
     model: str
     api_keys_env: str
     api_keys: tuple[str, ...]
+    prompt: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

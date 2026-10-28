@@ -17,8 +17,10 @@ MUST NOT allocate slowly, block, or raise. Two queues are involved:
 
 from __future__ import annotations
 
+import collections
 import queue
 import threading
+import time
 from typing import Any, Final
 
 import numpy as np
@@ -61,6 +63,7 @@ class AudioCapturer:
         self,
         config: AudioConfig,
         level_sink: queue.Queue[float] | None = None,
+        preroll_chunks: int = 8,
     ) -> None:
         self._config = config
         self._stream: sd.InputStream | None = None
@@ -78,6 +81,11 @@ class AudioCapturer:
         self._cap_hit_logged: bool = False
         self._meter = RmsLevelMeter()
         self._level_sink = level_sink
+        # Rolling pre-roll buffer (~200-250 ms) so speech isn't clipped
+        # if the user speaks right as they hit the push-to-talk key.
+        self._preroll: collections.deque[NDArray[np.float32]] = collections.deque(
+            maxlen=preroll_chunks
+        )
 
     def start(self) -> None:
         if self._stream is not None:
@@ -117,10 +125,21 @@ class AudioCapturer:
         self._dropped_at_cap = 0
         self._cap_hit_logged = False
         self._meter.reset()
+
+        # Inject pre-roll frames recorded right before the press event
+        while self._preroll:
+            chunk = self._preroll.popleft()
+            self._queue.put_nowait(chunk)
+            self._buffered_samples += chunk.shape[0]
+
         self._capturing.set()
 
     def end_capture(self) -> AudioClip:
+        # Brief pause if actively capturing live to let in-flight PortAudio buffers flush
+        if self._stream is not None and self._capturing.is_set():
+            time.sleep(0.08)
         self._capturing.clear()
+        self._preroll.clear()
         chunks = self._drain_queue()
         if self._dropped_at_cap:
             _log.warning(
@@ -154,7 +173,24 @@ class AudioCapturer:
         if status:
             # Non-fatal — usually overflow. Log lazily; do not raise.
             _log.debug("audio_callback_status", status=str(status))
+
+        # Level publication — always run (even past the cap) so the HUD
+        # bars keep responding to the user's voice. UI-only, so drop-oldest
+        # here is fine.
+        if self._level_sink is not None:
+            level = self._meter.observe(indata)
+            try:
+                self._level_sink.put_nowait(level)
+            except queue.Full:
+                try:
+                    self._level_sink.get_nowait()
+                    self._level_sink.put_nowait(level)
+                except (queue.Empty, queue.Full):
+                    pass
+
         if not self._capturing.is_set():
+            if self._stream is not None:
+                self._preroll.append(indata.copy())
             return
 
         # Drop-NEWEST at the max-seconds cap. The earlier drop-oldest
@@ -173,20 +209,6 @@ class AudioCapturer:
             chunk = indata.copy()
             self._queue.put_nowait(chunk)
             self._buffered_samples += chunk.shape[0]
-
-        # Level publication — always run (even past the cap) so the HUD
-        # bars keep responding to the user's voice. UI-only, so drop-oldest
-        # here is fine.
-        if self._level_sink is not None:
-            level = self._meter.observe(indata)
-            try:
-                self._level_sink.put_nowait(level)
-            except queue.Full:
-                try:
-                    self._level_sink.get_nowait()
-                    self._level_sink.put_nowait(level)
-                except (queue.Empty, queue.Full):
-                    pass
 
     def _drain_queue(self) -> list[NDArray[np.float32]]:
         chunks: list[NDArray[np.float32]] = []

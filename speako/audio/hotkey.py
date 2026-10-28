@@ -157,12 +157,44 @@ def _parse_key(name: str) -> keyboard.Key | keyboard.KeyCode:
     )
 
 
+_ALT_KEYS: Final[frozenset[keyboard.Key]] = frozenset({
+    keyboard.Key.alt,
+    keyboard.Key.alt_l,
+    keyboard.Key.alt_r,
+})
+_CMD_KEYS: Final[frozenset[keyboard.Key]] = frozenset({
+    keyboard.Key.cmd,
+    keyboard.Key.cmd_l,
+    keyboard.Key.cmd_r,
+})
+_CTRL_KEYS: Final[frozenset[keyboard.Key]] = frozenset({
+    keyboard.Key.ctrl,
+    keyboard.Key.ctrl_l,
+    keyboard.Key.ctrl_r,
+})
+_SHIFT_KEYS: Final[frozenset[keyboard.Key]] = frozenset({
+    keyboard.Key.shift,
+    keyboard.Key.shift_l,
+    keyboard.Key.shift_r,
+})
+
+
 def _matches(
     key: keyboard.Key | keyboard.KeyCode | None,
     target: keyboard.Key | keyboard.KeyCode,
 ) -> bool:
     if key is None:
         return False
+    if isinstance(target, keyboard.Key) and isinstance(key, keyboard.Key):
+        if target is keyboard.Key.alt:
+            return key in _ALT_KEYS
+        if target is keyboard.Key.cmd:
+            return key in _CMD_KEYS
+        if target is keyboard.Key.ctrl:
+            return key in _CTRL_KEYS
+        if target is keyboard.Key.shift:
+            return key in _SHIFT_KEYS
+        return bool(key == target)
     if isinstance(target, keyboard.Key):
         return bool(key == target)
     if isinstance(key, keyboard.KeyCode) and isinstance(target, keyboard.KeyCode):
