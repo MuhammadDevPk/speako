@@ -48,6 +48,7 @@ _CORNER_RADIUS: Final[int] = 26
 _FRAME_MS: Final[int] = 33                # ~30 fps
 _MAX_DRAIN_PER_TICK: Final[int] = 32
 _PASTED_HOLD_MS: Final[int] = 400         # visible → fade → hidden
+_TRANSCRIBING_TIMEOUT_MS: Final[int] = 60_000  # safety: reset stuck spinner after 60 s
 
 _BG: Final[str] = "#0f0f12"
 _PILL: Final[str] = "#1c1c22"
@@ -97,6 +98,10 @@ class Hud:
         self._events = events
         self._root: tk.Tk | None = None
         self._canvas: tk.Canvas | None = None
+        # Cached NSWindow proxy (macOS only) — used by _transition() to call
+        # orderFrontRegardless() so the HUD appears even in fullscreen Spaces
+        # where Accessory-policy apps can't use the normal orderFront:.
+        self._ns_window: Any = None
 
         # Live UI state (owned by the Tk thread once run() is called).
         self._hud_state: HudState = HudState.HIDDEN
@@ -105,6 +110,7 @@ class Hud:
         self._current_level: float = 0.0
         self._spin_angle: float = 0.0
         self._pasted_started_ms: int = 0
+        self._transcribing_started_ms: int = 0   # safety timeout for stuck spinner
         self._frame_index: int = 0
 
     # ------------------------------------------------------------------
@@ -146,7 +152,7 @@ class Hud:
         self._root.update_idletasks()
         self._root.update()
 
-        _apply_platform_hud_behavior(self._root)
+        self._ns_window = _apply_platform_hud_behavior(self._root)
 
         self._root.after(_FRAME_MS, self._tick)
         try:
@@ -154,6 +160,7 @@ class Hud:
         finally:
             self._root = None
             self._canvas = None
+            self._ns_window = None
             _log.info("hud_closed")
 
     # ------------------------------------------------------------------
@@ -219,6 +226,15 @@ class Hud:
             if elapsed_ms >= _PASTED_HOLD_MS:
                 self._transition(HudState.HIDDEN)
 
+        # Safety timeout: if TRANSCRIBING for > 60 s (network hung, unhandled
+        # exception that somehow slipped through), auto-reset to HIDDEN so the
+        # spinner never gets stuck on screen permanently.
+        if self._hud_state is HudState.TRANSCRIBING:
+            elapsed_ms = _now_ms() - self._transcribing_started_ms
+            if elapsed_ms >= _TRANSCRIBING_TIMEOUT_MS:
+                _log.warning("transcribing_timeout_auto_reset")
+                self._transition(HudState.HIDDEN)
+
         self._frame_index += 1
         if self._hud_state is not HudState.HIDDEN:
             self._render()
@@ -252,6 +268,16 @@ class Hud:
             self._root.attributes("-alpha", alpha)
         if target is HudState.PASTED:
             self._pasted_started_ms = _now_ms()
+        if target is HudState.TRANSCRIBING:
+            self._transcribing_started_ms = _now_ms()
+        # On macOS, Accessory-policy processes cannot call orderFront: when
+        # they are not the frontmost app — it silently fails in fullscreen
+        # Mission Control Spaces.  orderFrontRegardless() bypasses that check
+        # and forces our NSWindow to the front of its window level on every
+        # Space, including the active fullscreen Space.
+        if target is not HudState.HIDDEN and self._ns_window is not None:
+            with contextlib.suppress(Exception):
+                self._ns_window.orderFrontRegardless()
 
     def _destroy_root(self) -> None:
         assert self._root is not None
@@ -350,7 +376,7 @@ class Hud:
 # ---------------------------------------------------------------------------
 
 
-def _apply_platform_hud_behavior(root: tk.Tk) -> None:
+def _apply_platform_hud_behavior(root: tk.Tk) -> Any:
     """Configure the underlying OS window as a proper HUD.
 
     On macOS this does two things:
@@ -373,9 +399,13 @@ def _apply_platform_hud_behavior(root: tk.Tk) -> None:
 
     On other platforms this is a no-op — Linux/Windows already get the
     right behavior from ``overrideredirect`` + ``-topmost`` + ``-type``.
+
+    Returns the NSWindow proxy on macOS so ``Hud._transition`` can call
+    ``orderFrontRegardless()`` to force visibility in fullscreen Spaces;
+    returns ``None`` on every other platform.
     """
     if platform.system() != "Darwin":
-        return
+        return None
 
     try:
         from AppKit import (
@@ -386,11 +416,10 @@ def _apply_platform_hud_behavior(root: tk.Tk) -> None:
             NSWindowCollectionBehaviorCanJoinAllSpaces,
             NSWindowCollectionBehaviorFullScreenAuxiliary,
             NSWindowCollectionBehaviorIgnoresCycle,
-            NSWindowCollectionBehaviorStationary,
         )
     except ImportError:
         _log.warning("pyobjc_missing_hud_will_not_follow_spaces")
-        return
+        return None
 
     # Step 1 — process-wide: become a background agent so macOS stops
     # yanking the current Space back to the HUD's origin on every update.
@@ -407,26 +436,33 @@ def _apply_platform_hud_behavior(root: tk.Tk) -> None:
     # utilities (Rectangle, Bartender, Karabiner HUD, ...) to render over
     # any other app's fullscreen window. Going higher (screensaver = 1000)
     # would also cover the system menu bar, which we don't want.
+    #
+    # NSWindowCollectionBehaviorStationary is intentionally omitted — it
+    # prevents the window from appearing in fullscreen Mission Control Spaces
+    # when combined with CanJoinAllSpaces.
     ns_window = _find_ns_window(NSApp, _WINDOW_TITLE)
     if ns_window is None:
         _log.warning("hud_ns_window_not_found", activation_policy=resolved_policy)
-        return
+        return None
 
     behavior = (
         NSWindowCollectionBehaviorCanJoinAllSpaces
-        | NSWindowCollectionBehaviorStationary
         | NSWindowCollectionBehaviorIgnoresCycle
         | NSWindowCollectionBehaviorFullScreenAuxiliary
     )
     ns_window.setCollectionBehavior_(behavior)
     ns_window.setLevel_(NSPopUpMenuWindowLevel)
     ns_window.setIgnoresMouseEvents_(True)
+    # Initial orderFrontRegardless so the window is correctly ordered in its
+    # level before any state transitions — required on Accessory-policy apps.
+    ns_window.orderFrontRegardless()
     _log.info(
         "hud_macos_configured",
         activation_policy=resolved_policy,   # 1 = Accessory, 0 = Regular, 2 = Prohibited
         level=int(ns_window.level()),
         behavior=int(behavior),
     )
+    return ns_window
 
 
 def _find_ns_window(ns_app: Any, title: str) -> Any:

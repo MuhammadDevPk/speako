@@ -81,11 +81,22 @@ def _process(app: AppContext, clip: AudioClip) -> None:
         notify("speako", "Transcription failed. See logs.")
         _hud(app, HudState.HIDDEN)
         return
+    except Exception as exc:  # safety net — always clear TRANSCRIBING spinner
+        _log.error("transcribe_unexpected_error", error=str(exc))
+        notify("speako", "Transcription error. See logs.")
+        _hud(app, HudState.HIDDEN)
+        return
     if not transcript.text:
         _log.info("empty_transcript")
         _hud(app, HudState.HIDDEN)
         return
-    app.injector.insert(transcript.text)
+    try:
+        app.injector.insert(transcript.text)
+    except Exception as exc:  # ensure HUD is cleared even if paste fails
+        _log.error("insert_failed", error=str(exc))
+        notify("speako", "Failed to paste text. See logs.")
+        _hud(app, HudState.HIDDEN)
+        return
     _hud(app, HudState.PASTED)
 
 
