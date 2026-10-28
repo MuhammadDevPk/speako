@@ -23,13 +23,13 @@ audio:
   sample_rate: 16000   # Whisper family expects 16 kHz mono
   channels: 1
   device: null         # null → system default input
-  max_seconds: 120     # hard cap per capture
+  max_seconds: 3600    # cap per capture (1 hour for long conversations)
 
 hotkey:
   # Key name understood by pynput or friendly aliases:
   #   option (matches either Option key), right_option, left_option, right_cmd, etc.
   key: option
-  mode: hold           # "hold" (press-and-hold) or "toggle" (tap on / tap off)
+  mode: toggle         # "toggle" (tap once to start recording, tap again to finish)
 
 output:
   method: paste            # "paste" (clipboard + Cmd/Ctrl+V) or "type" (character-by-character)

@@ -29,9 +29,11 @@ if TYPE_CHECKING:
 _log: Final = get_logger(__name__)
 
 _DEFAULT_PROMPT: Final[str] = (
-    "Accurate verbatim speech transcription with correct spelling, capitalization, and punctuation."
+    "Accurate verbatim speech transcription with correct spelling, "
+    "capitalization, and punctuation."
 )
 
+_MIN_CHUNK_DURATION_SECONDS: Final[float] = 0.1
 _HTTP_PAYMENT_REQUIRED: Final[int] = 402
 _HTTP_TRANSIENT: Final[frozenset[int]] = frozenset({500, 502, 503, 504})
 _HTTP_FATAL_CLIENT: Final[frozenset[int]] = frozenset({400, 415, 422})
@@ -59,34 +61,43 @@ class GroqTranscriber:
             raise FatalProviderError("Groq requires an API key", self.provider)
         client = self._client(key.value)
         started = time.monotonic_ns()
-        normalized_clip = clip.normalize()
-        try:
-            kwargs: dict[str, Any] = {
-                "file": ("audio.wav", normalized_clip.to_wav_bytes(), "audio/wav"),
-                "model": self.model,
-                "response_format": "json",
-                "temperature": 0.0,
-            }
-            if self.prompt:
-                kwargs["prompt"] = self.prompt
-            if self.language:
-                kwargs["language"] = self.language
 
-            result = client.audio.transcriptions.create(**kwargs)
-        except Exception as exc:  # SDK-specific; mapped below
-            raise self._map_error(exc) from exc
+        chunks = clip.split_chunks(max_chunk_seconds=600.0)
+        texts: list[str] = []
+        for chunk in chunks:
+            if chunk.duration_seconds < _MIN_CHUNK_DURATION_SECONDS:
+                continue
+            normalized_chunk = chunk.normalize()
+            try:
+                kwargs: dict[str, Any] = {
+                    "file": ("audio.wav", normalized_chunk.to_wav_bytes(), "audio/wav"),
+                    "model": self.model,
+                    "response_format": "json",
+                    "temperature": 0.0,
+                }
+                if self.prompt:
+                    kwargs["prompt"] = self.prompt
+                if self.language:
+                    kwargs["language"] = self.language
 
-        raw: object = result
-        if isinstance(raw, str):
-            text = raw
-        elif isinstance(raw, dict):
-            text = str(raw.get("text", ""))
-        else:
-            text = str(getattr(raw, "text", ""))
+                result = client.audio.transcriptions.create(**kwargs)
+            except Exception as exc:  # SDK-specific; mapped below
+                raise self._map_error(exc) from exc
+
+            raw: object = result
+            if isinstance(raw, str):
+                chunk_text = raw
+            elif isinstance(raw, dict):
+                chunk_text = str(raw.get("text", ""))
+            else:
+                chunk_text = str(getattr(raw, "text", ""))
+
+            if chunk_text.strip():
+                texts.append(chunk_text.strip())
 
         elapsed_ms = (time.monotonic_ns() - started) // 1_000_000
         return Transcript(
-            text=text.strip(),
+            text=" ".join(texts).strip(),
             provider=self.provider,
             model=self.model,
             latency_ms=int(elapsed_ms),

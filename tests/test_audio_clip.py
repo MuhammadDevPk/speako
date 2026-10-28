@@ -59,3 +59,15 @@ def test_normalize_boosts_quiet_speech_and_removes_dc() -> None:
     # Boosted: 0.10 * (0.95 / 0.10) = 0.95
     assert np.isclose(np.mean(normalized.samples), 0.0, atol=1e-6)
     assert np.isclose(np.max(np.abs(normalized.samples)), 0.95, atol=1e-5)
+
+
+def test_split_chunks_for_long_audio() -> None:
+    # 25 seconds of audio split into 10-second chunks
+    sample_rate = 1000
+    samples = np.sin(np.linspace(0, 50 * np.pi, 25000, dtype=np.float32))
+    clip = AudioClip(samples=samples, sample_rate=sample_rate, channels=1)
+    chunks = clip.split_chunks(max_chunk_seconds=10.0)
+    assert len(chunks) >= 2
+    # Total duration across chunks must equal original duration
+    total_samples = sum(c.samples.shape[0] for c in chunks)
+    assert total_samples == 25000

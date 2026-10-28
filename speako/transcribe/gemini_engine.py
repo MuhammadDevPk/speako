@@ -32,6 +32,7 @@ _DEFAULT_PROMPT: Final[str] = (
     "Return only the verbatim transcription text without quotes or markdown formatting."
 )
 
+_MIN_CHUNK_DURATION_SECONDS: Final[float] = 0.1
 _HTTP_UNAUTHORIZED: Final[frozenset[int]] = frozenset({401, 403})
 _HTTP_RATE_LIMIT: Final[int] = 429
 _HTTP_PAYMENT_REQUIRED: Final[int] = 402
@@ -59,39 +60,48 @@ class GeminiTranscriber:
         from google.genai import types
 
         client = genai.Client(api_key=key.value)
-        normalized_clip = clip.normalize()
-        wav_bytes = normalized_clip.to_wav_bytes()
-        contents = [
-            self.prompt,
-            types.Part.from_bytes(data=wav_bytes, mime_type="audio/wav"),
-        ]
-
         started = time.monotonic_ns()
-        try:
-            response = client.models.generate_content(
-                model=self.model,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                ),
-            )
-        except Exception as exc:
-            raise self._map_error(exc) from exc
 
-        text = (getattr(response, "text", None) or "").strip()
-        # Clean up any surrounding quotes or markdown code block formatting
-        if text.startswith("```") and text.endswith("```"):
-            text = text.strip("`").strip()
-            if text.startswith("text\n") or text.startswith("markdown\n"):
-                text = text.split("\n", 1)[1]
-        if (text.startswith('"') and text.endswith('"')) or (
-            text.startswith("'") and text.endswith("'")
-        ):
-            text = text[1:-1].strip()
+        chunks = clip.split_chunks(max_chunk_seconds=600.0)
+        texts: list[str] = []
+        for chunk in chunks:
+            if chunk.duration_seconds < _MIN_CHUNK_DURATION_SECONDS:
+                continue
+            normalized_chunk = chunk.normalize()
+            wav_bytes = normalized_chunk.to_wav_bytes()
+            contents = [
+                self.prompt,
+                types.Part.from_bytes(data=wav_bytes, mime_type="audio/wav"),
+            ]
+
+            try:
+                response = client.models.generate_content(
+                    model=self.model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        temperature=0.0,
+                    ),
+                )
+            except Exception as exc:
+                raise self._map_error(exc) from exc
+
+            chunk_text = (getattr(response, "text", None) or "").strip()
+            # Clean up any surrounding quotes or markdown code block formatting
+            if chunk_text.startswith("```") and chunk_text.endswith("```"):
+                chunk_text = chunk_text.strip("`").strip()
+                if chunk_text.startswith("text\n") or chunk_text.startswith("markdown\n"):
+                    chunk_text = chunk_text.split("\n", 1)[1]
+            if (chunk_text.startswith('"') and chunk_text.endswith('"')) or (
+                chunk_text.startswith("'") and chunk_text.endswith("'")
+            ):
+                chunk_text = chunk_text[1:-1].strip()
+
+            if chunk_text.strip():
+                texts.append(chunk_text.strip())
 
         elapsed_ms = (time.monotonic_ns() - started) // 1_000_000
         return Transcript(
-            text=text,
+            text=" ".join(texts).strip(),
             provider=self.provider,
             model=self.model,
             latency_ms=int(elapsed_ms),

@@ -31,7 +31,12 @@ def run(app: AppContext, events: queue.Queue[RecordEvent], stop: threading.Event
     app.capturer.start()
     app.hotkey.start()
     _log.info("speako_ready", hotkey=app.config.hotkey.key, mode=app.config.hotkey.mode)
-    notify("speako", f"Ready. Hold {app.config.hotkey.key} to record.")
+    action_prompt = (
+        f"Click {app.config.hotkey.key} to start/stop recording."
+        if app.config.hotkey.mode == "toggle"
+        else f"Hold {app.config.hotkey.key} to record."
+    )
+    notify("speako", f"Ready. {action_prompt}")
 
     recording = False
     try:

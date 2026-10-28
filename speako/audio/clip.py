@@ -9,7 +9,6 @@ from __future__ import annotations
 import io
 import wave
 from dataclasses import dataclass
-
 from typing import Final
 
 import numpy as np
@@ -73,6 +72,53 @@ class AudioClip:
             sample_rate=self.sample_rate,
             channels=self.channels,
         )
+
+    def split_chunks(self, max_chunk_seconds: float = 600.0) -> list[AudioClip]:
+        """Split long audio into chunks not exceeding max_chunk_seconds.
+
+        Searches for silence / low energy near boundaries to avoid splitting mid-word.
+        """
+        if self.duration_seconds <= max_chunk_seconds:
+            return [self]
+
+        chunk_samples = int(max_chunk_seconds * self.sample_rate)
+        total_samples = self.samples.shape[0]
+        chunks: list[AudioClip] = []
+
+        start = 0
+        while start < total_samples:
+            end = min(start + chunk_samples, total_samples)
+            split_point = end
+
+            # If not at the end of audio, search for lowest amplitude window within +/- 5 seconds
+            if end < total_samples and (end - start) > int(10 * self.sample_rate):
+                window_size = int(5 * self.sample_rate)
+                search_start = max(start, end - window_size)
+                search_end = min(total_samples, end + window_size)
+                search_slice = self.samples[search_start:search_end]
+                block_len = int(0.1 * self.sample_rate)
+                if search_slice.shape[0] >= block_len:
+                    reshaped = np.abs(
+                        search_slice[: (search_slice.shape[0] // block_len) * block_len]
+                    )
+                    reshaped = (
+                        reshaped.mean(axis=1)
+                        if self.channels > 1
+                        else reshaped.reshape(-1)
+                    )
+                    blocks = reshaped.reshape(-1, block_len).mean(axis=1)
+                    min_idx = int(np.argmin(blocks))
+                    split_point = search_start + (min_idx * block_len)
+
+            chunk_clip = AudioClip(
+                samples=self.samples[start:split_point],
+                sample_rate=self.sample_rate,
+                channels=self.channels,
+            )
+            chunks.append(chunk_clip)
+            start = split_point
+
+        return chunks
 
 
 def _float32_to_pcm16(samples: NDArray[np.float32]) -> NDArray[np.int16]:

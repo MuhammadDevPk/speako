@@ -52,7 +52,8 @@ _DEFAULTS: Final[dict[str, Any]] = {
             "model": "whisper-large-v3",
             "api_keys_env": "GROQ_API_KEYS",
             "prompt": (
-                "Accurate speech transcription with proper spelling, capitalization, and punctuation."
+                "Accurate speech transcription with proper spelling, "
+                "capitalization, and punctuation."
             ),
             "language": None,
         },
@@ -71,11 +72,11 @@ _DEFAULTS: Final[dict[str, Any]] = {
         "sample_rate": 16000,
         "channels": 1,
         "device": None,
-        "max_seconds": 120,
+        "max_seconds": 3600,
     },
     "hotkey": {
         "key": "option",
-        "mode": "hold",
+        "mode": "toggle",
     },
     "output": {
         "method": "paste",

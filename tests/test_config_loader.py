@@ -26,7 +26,8 @@ def test_defaults_api_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     assert cfg.providers.gemini.model == "gemini-2.5-flash"
     assert cfg.providers.local is None
     assert cfg.audio.sample_rate == 16000
-    assert cfg.hotkey.mode == "hold"
+    assert cfg.audio.max_seconds == 3600
+    assert cfg.hotkey.mode == "toggle"
 
 
 def test_yaml_overrides_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -143,9 +144,9 @@ def test_invalid_hotkey_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     )
     monkeypatch.chdir(tmp_path)
     with pytest.raises(ConfigError, match="hotkey.mode"):
-        load_config(project_config=cfg_path, load_env=False)
+        load_config(project_config=cfg_path, load_env=False, user_config=False)
 
 
 def test_missing_config_file(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="not found"):
-        load_config(project_config=tmp_path / "nope.yaml", load_env=False)
+        load_config(project_config=tmp_path / "nope.yaml", load_env=False, user_config=False)

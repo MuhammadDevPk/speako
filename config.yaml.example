@@ -23,7 +23,7 @@ audio:
   sample_rate: 16000   # Whisper family expects 16 kHz mono
   channels: 1
   device: null         # null → system default input
-  max_seconds: 120     # hard cap per capture
+  max_seconds: 3600    # cap per capture (1 hour for long conversations)
 
 hotkey:
   # Any of:
@@ -32,8 +32,8 @@ hotkey:
   #   Friendly aliases: right_option, left_option, right_cmd, left_cmd,
   #     right_ctrl, left_ctrl, option, command, control, ...
   #   Single characters: "a", "'"
-  key: right_option
-  mode: hold           # "hold" (press-and-hold) or "toggle" (tap on / tap off)
+  key: option
+  mode: toggle         # "toggle" (tap on / tap off) or "hold" (press-and-hold)
 
 output:
   method: paste            # "paste" (clipboard + Cmd/Ctrl+V) or "type" (character-by-character)
