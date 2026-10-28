@@ -425,7 +425,6 @@ def _apply_platform_hud_behavior(root: tk.Tk) -> Any:
             NSWindowCollectionBehaviorCanJoinAllSpaces,
             NSWindowCollectionBehaviorFullScreenAuxiliary,
             NSWindowCollectionBehaviorIgnoresCycle,
-            NSWindowCollectionBehaviorMoveToActiveSpace,
         )
     except ImportError:
         _log.warning("pyobjc_missing_hud_will_not_follow_spaces")
@@ -448,10 +447,10 @@ def _apply_platform_hud_behavior(root: tk.Tk) -> Any:
     # would also cover the system menu bar, which we don't want.
     #
     # Behavior flags:
-    #   CanJoinAllSpaces   — window exists on every Space simultaneously
+    #   CanJoinAllSpaces    — window exists on every Space simultaneously
+    #                         (mutually exclusive with MoveToActiveSpace)
     #   FullScreenAuxiliary — allowed to appear over fullscreen app Spaces
-    #   MoveToActiveSpace  — when shown, moves to whichever Space is active
-    #   IgnoresCycle       — excluded from Cmd-Tab / window cycling
+    #   IgnoresCycle        — excluded from Cmd-Tab / window cycling
     #
     # NSWindowCollectionBehaviorStationary is intentionally omitted — it
     # prevents the window from appearing in fullscreen Mission Control Spaces
@@ -463,7 +462,6 @@ def _apply_platform_hud_behavior(root: tk.Tk) -> Any:
 
     behavior = (
         NSWindowCollectionBehaviorCanJoinAllSpaces
-        | NSWindowCollectionBehaviorMoveToActiveSpace
         | NSWindowCollectionBehaviorIgnoresCycle
         | NSWindowCollectionBehaviorFullScreenAuxiliary
     )
