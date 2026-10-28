@@ -49,6 +49,7 @@ _FRAME_MS: Final[int] = 33                # ~30 fps
 _MAX_DRAIN_PER_TICK: Final[int] = 32
 _PASTED_HOLD_MS: Final[int] = 400         # visible → fade → hidden
 _TRANSCRIBING_TIMEOUT_MS: Final[int] = 60_000  # safety: reset stuck spinner after 60 s
+_FRONT_ASSERT_FRAMES: Final[int] = 16     # re-order front every ~500 ms while HUD is visible
 
 _BG: Final[str] = "#0f0f12"
 _PILL: Final[str] = "#1c1c22"
@@ -238,6 +239,14 @@ class Hud:
         self._frame_index += 1
         if self._hud_state is not HudState.HIDDEN:
             self._render()
+            # Periodically re-assert the window front position so it stays
+            # visible when the user switches to or from a fullscreen Space.
+            # A single orderFrontRegardless() at transition time is not enough
+            # because macOS restacks windows when Mission Control Spaces change.
+            # Every ~16 frames (≈500 ms at 30 fps) is cheap and invisible.
+            if self._frame_index % _FRONT_ASSERT_FRAMES == 0 and self._ns_window is not None:
+                with contextlib.suppress(Exception):
+                    self._ns_window.orderFrontRegardless()
 
         if shutdown:
             self._destroy_root()
@@ -416,6 +425,7 @@ def _apply_platform_hud_behavior(root: tk.Tk) -> Any:
             NSWindowCollectionBehaviorCanJoinAllSpaces,
             NSWindowCollectionBehaviorFullScreenAuxiliary,
             NSWindowCollectionBehaviorIgnoresCycle,
+            NSWindowCollectionBehaviorMoveToActiveSpace,
         )
     except ImportError:
         _log.warning("pyobjc_missing_hud_will_not_follow_spaces")
@@ -437,6 +447,12 @@ def _apply_platform_hud_behavior(root: tk.Tk) -> Any:
     # any other app's fullscreen window. Going higher (screensaver = 1000)
     # would also cover the system menu bar, which we don't want.
     #
+    # Behavior flags:
+    #   CanJoinAllSpaces   — window exists on every Space simultaneously
+    #   FullScreenAuxiliary — allowed to appear over fullscreen app Spaces
+    #   MoveToActiveSpace  — when shown, moves to whichever Space is active
+    #   IgnoresCycle       — excluded from Cmd-Tab / window cycling
+    #
     # NSWindowCollectionBehaviorStationary is intentionally omitted — it
     # prevents the window from appearing in fullscreen Mission Control Spaces
     # when combined with CanJoinAllSpaces.
@@ -447,6 +463,7 @@ def _apply_platform_hud_behavior(root: tk.Tk) -> Any:
 
     behavior = (
         NSWindowCollectionBehaviorCanJoinAllSpaces
+        | NSWindowCollectionBehaviorMoveToActiveSpace
         | NSWindowCollectionBehaviorIgnoresCycle
         | NSWindowCollectionBehaviorFullScreenAuxiliary
     )
